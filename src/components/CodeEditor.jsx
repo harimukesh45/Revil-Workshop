@@ -2,8 +2,32 @@ import React, { useState } from 'react';
 import { Play } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { cpp } from '@codemirror/lang-cpp';
+import { java } from '@codemirror/lang-java';
+import { rust } from '@codemirror/lang-rust';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { motion } from 'framer-motion';
+
+const languageExtensions = {
+  javascript: javascript(),
+  python: python(),
+  cpp: cpp(),
+  c: cpp(),
+  java: java(),
+  rust: rust(),
+  ruby: null, // CodeMirror doesn't have a built-in Ruby mode
+};
+
+const supportedLanguages = {
+  javascript: 'javascript',
+  python: 'python',
+  cpp: 'cpp',
+  c: 'c',
+  java: 'java',
+  rust: 'rust',
+  ruby: 'ruby',
+};
 
 const CodeEditor = ({ code, onChange, onResult, isDisabled }) => {
   const [language, setLanguage] = useState('javascript');
@@ -13,45 +37,40 @@ const CodeEditor = ({ code, onChange, onResult, isDisabled }) => {
     if (isDisabled) return;
     setIsExecuting(true);
     try {
-      if (language === 'javascript') {
-        const result = executeJavaScript(code);
-        onResult(result);
-      }
+      const result = await executeCode(code, language);
+      onResult(result);
     } catch (error) {
       onResult({
         success: false,
         output: null,
-        error: 'Execution failed: ' + error.message
+        error: 'Execution failed: ' + error.message,
       });
     }
     setIsExecuting(false);
   };
 
-  const executeJavaScript = (code) => {
-    let consoleOutput = [];
-    const originalConsole = console.log;
-    console.log = (...args) => {
-      consoleOutput.push(args.map(arg => 
-        typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-      ).join(' '));
-    };
-
+  const executeCode = async (code, language) => {
     try {
-      const func = new Function(code);
-      const returnValue = func();
-      console.log = originalConsole;
+      const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language: supportedLanguages[language],
+          version: '*', // Auto-select latest version
+          source: code,
+        }),
+      });
 
+      if (!response.ok) throw new Error(`API responded with status ${response.status}`);
+
+      const data = await response.json();
       return {
-        success: true,
-        output: [
-          ...(consoleOutput.length ? ['Console output:', ...consoleOutput] : []),
-          ...(returnValue !== undefined ? [`Return value: ${returnValue}`] : []),
-        ].join('\n'),
-        error: null,
+        success: response.ok,
+        output: data?.run?.output || '',
+        error: data?.run?.stderr || (response.ok ? null : 'Unknown execution error'),
       };
     } catch (error) {
-      console.log = originalConsole;
-      return { success: false, output: null, error: error.message };
+      return { success: false, output: null, error: `Execution request failed: ${error.message}` };
     }
   };
 
@@ -76,7 +95,9 @@ const CodeEditor = ({ code, onChange, onResult, isDisabled }) => {
             onChange={(e) => setLanguage(e.target.value)}
             disabled={isDisabled}
           >
-            <option value="javascript">JavaScript</option>
+            {Object.keys(supportedLanguages).map((lang) => (
+              <option key={lang} value={lang}>{lang.charAt(0).toUpperCase() + lang.slice(1)}</option>
+            ))}
           </select>
         </div>
         
@@ -88,7 +109,7 @@ const CodeEditor = ({ code, onChange, onResult, isDisabled }) => {
         >
           <CodeMirror
             value={code}
-            extensions={[javascript()]}
+            extensions={languageExtensions[language] ? [languageExtensions[language]] : []}
             theme={oneDark}
             onChange={(value) => onChange(value)}
             basicSetup={{ lineNumbers: true }}
